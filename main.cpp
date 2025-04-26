@@ -395,104 +395,18 @@ int16_t transTableEvalM3(const chess::Board &board, int maxDepth) {
     return eval;
 }
 
-std::pair<int16_t, bool> minimaxTT(chess::Board board, int depth, auto endTime, int16_t alpha, int16_t beta, int maxDepth) {
-    if (getTime() > endTime) {
-        return std::make_pair(0, true);
-    }
-    if (board.isRepetition(2) || board.isHalfMoveDraw() || board.isInsufficientMaterial()) {
-        return std::make_pair(0, false);
-    }
-    if (depth == 0) {
-        return std::make_pair(transTableEval(board, maxDepth - depth), false);
-    }
-
-    chess::Movelist moves;
-    chess::movegen::legalmoves(moves, board);
-
-    if (moves.size() == 0) {
-        if (board.inCheck()) {
-            return board.sideToMove() ? std::make_pair((32767 - maxDepth) + depth, false) : std::make_pair((-32767 + maxDepth) - depth, false);
+// Stores hash as key and pair of evaluation and depth (in that order) as value.
+std::unordered_map<uint64_t, std::pair<int16_t, int16_t>> transpositionTableWD;
+int16_t transTableEvalWD(const chess::Board &board, int maxDepth) {
+    auto loc = transpositionTableWD.find(board.hash());
+    if (loc != transpositionTableWD.end()) {
+        if (loc->second.second >= maxDepth) {
+            return loc->second.first;
         }
-        return std::make_pair(0, false);
     }
-
-    int16_t eval;
-    if (board.sideToMove()) {
-        eval = 32767;
-    } else {
-        eval = -32767;
-    }
-
-    for (const auto &move : moves) {
-        board.makeMove(move);
-        if (board.sideToMove()) {
-            auto newEval = minimaxTT(board, depth - 1, endTime, alpha, beta, maxDepth);
-            if (!newEval.second) {
-                eval = std::max(eval, newEval.first);
-                if (eval >= beta) {
-                    return std::make_pair(beta, false);
-                }
-                alpha = std::max(alpha, eval);
-            } else {
-                return std::make_pair(0, true);
-            }
-        } else {
-            auto newEval = minimaxTT(board, depth - 1, endTime, alpha, beta, maxDepth);
-            if (!newEval.second) {
-                eval = std::min(eval, newEval.first);
-                if (eval <= alpha) {
-                    return std::make_pair(alpha, false);
-                }
-                beta = std::min(beta, eval);
-            } else {
-                return std::make_pair(0, true);
-            }
-        }
-        board.unmakeMove(move);
-    }
-    return std::make_pair(eval, false);
-}
-
-chess::Move searchTT(chess::Board board, int timeMS) {
-    auto endTime = getTime() + timeMS;
-    chess::Movelist moves;
-    chess::movegen::legalmoves(moves, board);
-    std::vector<std::pair<chess::Move, int16_t>> scores;
-    for (const auto &move : moves) {
-        board.makeMove(move);
-        scores.push_back({move, minimaxTT(board, 0, 1000000, -32767, 32767, 0).first});
-        board.unmakeMove(move);
-    }
-    int count{1};
-    while (getTime() < endTime) {
-        for (const auto &move : moves) {
-            board.makeMove(move);
-            // Find pair where move is the first element in the pair
-            auto it = std::find_if(scores.begin(), scores.end(), [move](const std::pair<chess::Move, int16_t> &pair) {
-                return pair.first == move;
-            });
-            auto re = minimaxTT(board, count, endTime, -32767, 32767, count);
-            if (!re.second) {
-                if (it != scores.end()) {
-                    it->second = re.first;
-                }
-            }
-            board.unmakeMove(move);
-        }
-        count++;
-    }
-    transpositionTable.clear();
-    if (board.sideToMove()) {
-        std::sort(scores.begin(), scores.end(), [](const std::pair<chess::Move, int16_t> &a, const std::pair<chess::Move, int16_t> &b) {
-            return a.second < b.second;
-        });
-    } else {
-        std::sort(scores.begin(), scores.end(), [](const std::pair<chess::Move, int16_t> &a, const std::pair<chess::Move, int16_t> &b) {
-            return a.second > b.second;
-        });
-    }
-    // std::cout << "N:\t" <<scores[0].second << "\tdepth: " << count - 1 << std::endl;
-    return scores[0].first;
+    auto eval = material3(board, maxDepth);
+    transpositionTableWD[board.hash()] = std::make_pair(eval, material3(board, maxDepth));
+    return eval;
 }
 
 std::pair<int16_t, bool> minimaxTTM3(chess::Board board, int depth, auto endTime, int16_t alpha, int16_t beta, int maxDepth) {
@@ -526,7 +440,7 @@ std::pair<int16_t, bool> minimaxTTM3(chess::Board board, int depth, auto endTime
     for (const auto &move : moves) {
         board.makeMove(move);
         if (board.sideToMove()) {
-            auto newEval = minimaxTT(board, depth - 1, endTime, alpha, beta, maxDepth);
+            auto newEval = minimaxTTM3(board, depth - 1, endTime, alpha, beta, maxDepth);
             if (!newEval.second) {
                 eval = std::max(eval, newEval.first);
                 if (eval >= beta) {
@@ -537,7 +451,7 @@ std::pair<int16_t, bool> minimaxTTM3(chess::Board board, int depth, auto endTime
                 return std::make_pair(0, true);
             }
         } else {
-            auto newEval = minimaxTT(board, depth - 1, endTime, alpha, beta, maxDepth);
+            auto newEval = minimaxTTM3(board, depth - 1, endTime, alpha, beta, maxDepth);
             if (!newEval.second) {
                 eval = std::min(eval, newEval.first);
                 if (eval <= alpha) {
@@ -622,6 +536,141 @@ chess::Move searchTTM3(chess::Board board, int timeMS) {
     return scores[0].first;
 }
 
+std::pair<int16_t, bool> minimaxTTWD(chess::Board board, int depth, auto endTime, int16_t alpha, int16_t beta, int maxDepth) {
+    if (getTime() > endTime) {
+        return std::make_pair(0, true);
+    }
+    if (board.isRepetition(2) || board.isHalfMoveDraw() || board.isInsufficientMaterial()) {
+        return std::make_pair(0, false);
+    }
+    if (depth <= 0) {
+        return std::make_pair(transTableEvalM3(board, maxDepth - depth), false);
+    }
+
+    chess::Movelist moves;
+    chess::movegen::legalmoves(moves, board);
+
+    if (moves.size() == 0) {
+        if (board.inCheck()) {
+            return board.sideToMove() ? std::make_pair((32767 - maxDepth) + depth, false) : std::make_pair((-32767 + maxDepth) - depth, false);
+        }
+        return std::make_pair(0, false);
+    }
+
+    auto loc = transpositionTableWD.find(board.hash());
+    if (loc != transpositionTableWD.end()) {
+        if (loc->second.second >= depth) {
+            return std::make_pair(loc->second.first, false);
+        }
+    }
+
+    int16_t eval;
+    if (board.sideToMove()) {
+        eval = 32767;
+    } else {
+        eval = -32767;
+    }
+
+    for (const auto &move : moves) {
+        board.makeMove(move);
+        if (board.sideToMove()) {
+            auto newEval = minimaxTTWD(board, depth - 1, endTime, alpha, beta, maxDepth);
+            if (!newEval.second) {
+                eval = std::max(eval, newEval.first);
+                if (eval >= beta) {
+                    return std::make_pair(beta, false);
+                }
+                alpha = std::max(alpha, eval);
+            } else {
+                return std::make_pair(0, true);
+            }
+        } else {
+            auto newEval = minimaxTTWD(board, depth - 1, endTime, alpha, beta, maxDepth);
+            if (!newEval.second) {
+                eval = std::min(eval, newEval.first);
+                if (eval <= alpha) {
+                    return std::make_pair(alpha, false);
+                }
+                beta = std::min(beta, eval);
+            } else {
+                return std::make_pair(0, true);
+            }
+        }
+        board.unmakeMove(move);
+    }
+    transpositionTableWD[board.hash()] = std::make_pair(eval, depth);
+    return std::make_pair(eval, false);
+}
+
+chess::Move searchTTWD(chess::Board board, int timeMS) {
+    auto endTime = getTime() + timeMS;
+    chess::Movelist moves;
+    chess::movegen::legalmoves(moves, board);
+    std::vector<std::pair<chess::Move, int16_t>> scores;
+    for (const auto &move : moves) {
+        board.makeMove(move);
+        scores.push_back({move, minimaxTTWD(board, 0, 1000000, -32767, 32767, 0).first});
+        board.unmakeMove(move);
+    }
+    int count{1};
+    while (getTime() < endTime) {
+        int16_t maxScore;
+        if (board.sideToMove()) {
+            maxScore = 32767;
+        } else {
+            maxScore = -32767;
+        }
+        for (const auto &move : moves) {
+            board.makeMove(move);
+            // Find pair where move is the first element in the pair
+            auto it = std::find_if(scores.begin(), scores.end(), [move](const std::pair<chess::Move, int16_t> &pair) {
+                return pair.first == move;
+            });
+            std::pair<int16_t, bool> re;
+            if (!board.sideToMove()) {
+                if (maxScore > 0 && it->second > abs(maxScore * 2)) {
+                    re = minimaxTTWD(board, count - 1, endTime, -32767, 32767, count - 1);
+                }
+                else {
+                    re = minimaxTTWD(board, count, endTime, -32767, 32767, count);
+                }
+            }
+            else {
+                if (maxScore > 0 && it->second < -abs(maxScore * 2)) {
+                    re = minimaxTTWD(board, count - 1, endTime, -32767, 32767, count - 1);
+                }
+                else {
+                    re = minimaxTTWD(board, count, endTime, -32767, 32767, count);
+                }
+            }
+            if (!re.second) {
+                if (it != scores.end()) {
+                    it->second = re.first;
+                }
+            }
+            if (!board.sideToMove()) {
+                maxScore = std::min(maxScore, re.first);
+            } else {
+                maxScore = std::max(maxScore, re.first);
+            }
+            board.unmakeMove(move);
+        }
+        count++;
+    }
+    transpositionTableWD.clear();
+    if (board.sideToMove()) {
+        std::sort(scores.begin(), scores.end(), [](const std::pair<chess::Move, int16_t> &a, const std::pair<chess::Move, int16_t> &b) {
+            return a.second < b.second;
+        });
+    } else {
+        std::sort(scores.begin(), scores.end(), [](const std::pair<chess::Move, int16_t> &a, const std::pair<chess::Move, int16_t> &b) {
+            return a.second > b.second;
+        });
+    }
+    // std::cout << "N:\t" <<scores[0].second << "\tdepth: " << count - 1 << std::endl;
+    return scores[0].first;
+}
+
 // Generate random move
 chess::Move randomMove(const chess::Board &board) {
     chess::Movelist moves;
@@ -649,7 +698,7 @@ int main() {
             if (!(mainBoard.isGameOver().second == chess::GameResult::NONE && !mainBoard.isHalfMoveDraw() && !mainBoard.isRepetition(3) && !mainBoard.isInsufficientMaterial())) {
                 break;
             }
-            mainBoard.makeMove(searchTT(mainBoard, 100));
+            mainBoard.makeMove(searchTTWD(mainBoard, 100));
         }
         if (mainBoard.isGameOver().second == chess::GameResult::DRAW || mainBoard.isHalfMoveDraw() || mainBoard.isRepetition(3) || mainBoard.isInsufficientMaterial()) {
             draw++;
@@ -671,7 +720,7 @@ int main() {
         std::cout << "Game: " << ++game << std::endl;
         mainBoard = chess::Board(line);
         while (mainBoard.isGameOver().second == chess::GameResult::NONE && !mainBoard.isHalfMoveDraw() && !mainBoard.isRepetition(3) && !mainBoard.isInsufficientMaterial()) {
-            mainBoard.makeMove(searchTT(mainBoard, 100));
+            mainBoard.makeMove(searchTTWD(mainBoard, 100));
             if (!(mainBoard.isGameOver().second == chess::GameResult::NONE && !mainBoard.isHalfMoveDraw() && !mainBoard.isRepetition(3) && !mainBoard.isInsufficientMaterial())) {
                 break;
             }
