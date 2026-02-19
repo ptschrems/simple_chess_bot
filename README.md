@@ -21,6 +21,6 @@ Statistical Noise Analysis: Investigated the probability of "true" skill improve
 ## Technical Stack
 Language: C++20
 
-Key Libraries: chess-library (for core board representation)
+Key Libraries: [chess-library](https://disservin.github.io/chess-library/) (for core board representation)
 
 Mathematical Concepts: Combinatorial Game Theory, Bitwise Logic, Statistical Evaluation.
