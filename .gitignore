@@ -1,0 +1,51 @@
+# Compiled binaries, libraries, and objects
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+*.app
+
+# Debug / symbols
+*.pdb
+*.ilk
+*.dSYM/
+*.suo
+*.idb
+
+# Build directories
+build/
+bin/
+out/
+target/
+cmake-build-*/
+
+# VS Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# Visual Studio / MSVC artifacts
+.vs/
+Debug/
+Release/
+x64/
+x86/
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Test / Profiling / Coverage
+*.gcno
+*.gcda
+*.gcov
+coverage/
+perf.data*
