@@ -21,6 +21,7 @@ file(GLOB CPP_BOT_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cppBots
 foreach(CPP_SRC ${CPP_BOT_SOURCES})
     get_filename_component(BOT_NAME ${CPP_SRC} NAME_WE)
     add_executable(${BOT_NAME} ${CPP_SRC})
+    target_include_directories(${BOT_NAME} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/cppBots")
 endforeach()
 
 # 2. Compile every .py file in bots/pyBots/ -> bots/<name>.exe via PyInstaller
