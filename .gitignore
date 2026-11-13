@@ -49,3 +49,24 @@ $RECYCLE.BIN/
 *.gcov
 coverage/
 perf.data*
+
+# CMake & VS Code CMake Tools build directories
+build/
+**/build/
+out/
+
+# Compiled bot executables in bots/
+bots/*.exe
+
+# PyInstaller build artifacts (if run outside build/)
+dist/
+*.spec
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local bot match & perft logs
+results/
