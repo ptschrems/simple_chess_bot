@@ -1,0 +1,3 @@
+[submodule "bots/cppBots/chess-library"]
+	path = bots/cppBots/chess-library
+	url = https://github.com/Disservin/chess-library.git
