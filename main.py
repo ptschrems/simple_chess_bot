@@ -7,7 +7,8 @@ from typing import Optional, Callable
 import pygame
 import chess
 import chess.engine
-from results import RecordMatchResult
+from results import RecordMatchResult, GetLeaderboardSummary, GetAvailableOpponents
+from suite import SelectFenFile, LoadFenList, FenSuiteRunner
 
 # Constants
 BoardSize = 8
@@ -57,6 +58,10 @@ ColorStartButton = pygame.Color(46, 125, 50)
 ColorStartButtonHover = pygame.Color(56, 142, 60)
 ColorResetButton = pygame.Color(150, 50, 50)
 ColorResetButtonHover = pygame.Color(175, 60, 60)
+ColorSuiteButton = pygame.Color(45, 95, 155)
+ColorSuiteButtonHover = pygame.Color(55, 115, 185)
+ColorLeaderboardBg = pygame.Color(26, 26, 26)
+ColorLeaderboardRowAlt = pygame.Color(34, 34, 34)
 ColorWhitePiece = pygame.Color(245, 245, 245)
 ColorBlackPiece = pygame.Color(18, 18, 18)
 
@@ -227,6 +232,18 @@ class DropdownMenu:
             return self.options[self.selectedIndex]
         return self.options[0] if self.options else "Human"
 
+    def SetSelectedOption(self, value: str) -> None:
+        if value in self.options:
+            self.selectedIndex = self.options.index(value)
+
+    def SetOptions(self, newOptions: list[str]) -> None:
+        current = self.GetSelectedOption()
+        self.options = newOptions if newOptions else ["All Opponents"]
+        if current in self.options:
+            self.selectedIndex = self.options.index(current)
+        else:
+            self.selectedIndex = 0
+
     def Draw(
         self, surface: pygame.Surface, font: pygame.font.Font, mousePosition: tuple[int, int]
     ) -> None:
@@ -337,6 +354,115 @@ def DrawPieces(surface: pygame.Surface, board: chess.Board, pieceFont: pygame.fo
         surface.blit(pieceSurface, pieceRect)
 
 
+def DrawLeaderboardView(
+    surface: pygame.Surface,
+    titleFont: pygame.font.Font,
+    headerFont: pygame.font.Font,
+    rowFont: pygame.font.Font,
+    opponentDropdown: DropdownMenu,
+    leaderboardData: list[dict],
+    scrollOffset: int,
+    mousePosition: tuple[int, int],
+) -> None:
+    areaRect = pygame.Rect(0, 0, BoardPixelSize, BoardPixelSize)
+    pygame.draw.rect(surface, ColorLeaderboardBg, areaRect)
+
+    selectedFilter = opponentDropdown.GetSelectedOption()
+    isPerftMode = selectedFilter == "Perft"
+
+    # Header Title & Opponent Filter Dropdown
+    titleSurface = titleFont.render("Leaderboard", True, ColorClockActive)
+    surface.blit(titleSurface, (20, 22))
+
+    filterLabel = headerFont.render("Opponent:", True, ColorPanelText)
+    surface.blit(filterLabel, (335, 28))
+    opponentDropdown.Draw(surface, headerFont, mousePosition)
+
+    if isPerftMode:
+        columns = [
+            ("#", 24),
+            ("Bot", 64),
+            ("Runs", 240),
+            ("Depth", 305),
+            ("Nodes", 375),
+            ("Time (s)", 480),
+            ("Best NPS", 555),
+        ]
+    else:
+        columns = [
+            ("#", 24),
+            ("Bot", 64),
+            ("Games", 260),
+            ("W", 335),
+            ("D", 390),
+            ("L", 445),
+            ("Score", 500),
+            ("Win %", 565),
+        ]
+
+    headerY = 82
+    headerRect = pygame.Rect(16, headerY - 6, BoardPixelSize - 32, 32)
+    pygame.draw.rect(surface, ColorDropdownBackground, headerRect, border_radius=4)
+    pygame.draw.rect(surface, ColorDropdownBorder, headerRect, width=1, border_radius=4)
+
+    for colLabel, colX in columns:
+        colSurf = headerFont.render(colLabel, True, ColorClockActive)
+        surface.blit(colSurf, (colX, headerY))
+
+    if not leaderboardData:
+        emptyMsg = (
+            "No perft benchmarks recorded yet."
+            if isPerftMode
+            else f"No matches recorded against '{selectedFilter}' yet."
+        )
+        emptySurf = rowFont.render(emptyMsg, True, ColorClockInactive)
+        emptyRect = emptySurf.get_rect(center=(BoardPixelSize // 2, BoardPixelSize // 2))
+        surface.blit(emptySurf, emptyRect)
+    else:
+        rowHeight = 34
+        startY = headerY + 34
+        maxVisibleRows = (BoardPixelSize - startY - 16) // rowHeight
+        visibleSlice = leaderboardData[scrollOffset : scrollOffset + maxVisibleRows]
+
+        for idx, entry in enumerate(visibleSlice):
+            rank = scrollOffset + idx + 1
+            rowY = startY + idx * rowHeight
+            rowRect = pygame.Rect(16, rowY, BoardPixelSize - 32, rowHeight - 2)
+
+            if idx % 2 == 1:
+                pygame.draw.rect(surface, ColorLeaderboardRowAlt, rowRect, border_radius=3)
+
+            if isPerftMode:
+                values = [
+                    (str(rank), 24),
+                    (entry["botName"][:18], 64),
+                    (str(entry["runs"]), 240),
+                    (str(entry["maxDepth"]), 305),
+                    (f"{entry['nodes']:,}", 375),
+                    (f"{entry['timeSeconds']:.3f}", 480),
+                    (f"{entry['bestPerftNps']:,}", 555),
+                ]
+            else:
+                values = [
+                    (str(rank), 24),
+                    (entry["botName"][:20], 64),
+                    (str(entry["games"]), 260),
+                    (str(entry["wins"]), 335),
+                    (str(entry["draws"]), 390),
+                    (str(entry["losses"]), 445),
+                    (f"{entry['score']:g}", 500),
+                    (f"{entry['winRate']:.1f}%", 565),
+                ]
+
+            for valText, valX in values:
+                valSurf = rowFont.render(valText, True, ColorPanelText)
+                surface.blit(valSurf, (valX, rowY + 7))
+
+    # Draw opponent dropdown list on top of the table rows if open
+    if opponentDropdown.isOpen:
+        opponentDropdown.DrawExpandedList(surface, headerFont, mousePosition)
+
+
 def DrawClockBox(
     surface: pygame.Surface,
     clockFont: pygame.font.Font,
@@ -354,20 +480,17 @@ def DrawClockBox(
     surface.blit(textSurface, textRect)
 
 
-def DrawActionButton(
+def DrawButton(
     surface: pygame.Surface,
     font: pygame.font.Font,
     buttonRect: pygame.Rect,
-    gameStarted: bool,
+    label: str,
+    baseColor: pygame.Color,
+    hoverColor: pygame.Color,
     mousePosition: tuple[int, int],
 ) -> None:
     isHovered = buttonRect.collidepoint(mousePosition)
-    if not gameStarted:
-        bgColor = ColorStartButtonHover if isHovered else ColorStartButton
-        label = "Start Game"
-    else:
-        bgColor = ColorResetButtonHover if isHovered else ColorResetButton
-        label = "Reset Game"
+    bgColor = hoverColor if isHovered else baseColor
 
     pygame.draw.rect(surface, bgColor, buttonRect, border_radius=5)
     pygame.draw.rect(surface, ColorDropdownBorder, buttonRect, width=1, border_radius=5)
@@ -386,8 +509,13 @@ def DrawControlPanel(
     blackDropdown: DropdownMenu,
     timeDropdown: DropdownMenu,
     actionButtonRect: pygame.Rect,
+    suiteButtonRect: pygame.Rect,
+    leaderboardButtonRect: pygame.Rect,
+    showLeaderboard: bool,
     gameStarted: bool,
+    suiteActive: bool,
     statusText: str,
+    suiteStatusText: str,
     whiteTimeText: str,
     blackTimeText: str,
     currentTurn: chess.Color,
@@ -415,14 +543,62 @@ def DrawControlPanel(
     timeDropdown.Draw(surface, headerFont, mousePosition)
 
     # Start / Reset Button
-    DrawActionButton(surface, buttonFont, actionButtonRect, gameStarted, mousePosition)
+    if not gameStarted and not suiteActive:
+        DrawButton(
+            surface,
+            buttonFont,
+            actionButtonRect,
+            "Start Game",
+            ColorStartButton,
+            ColorStartButtonHover,
+            mousePosition,
+        )
+    else:
+        DrawButton(
+            surface,
+            buttonFont,
+            actionButtonRect,
+            "Reset / Stop",
+            ColorResetButton,
+            ColorResetButtonHover,
+            mousePosition,
+        )
+
+    # Run FEN Suite Button
+    DrawButton(
+        surface,
+        buttonFont,
+        suiteButtonRect,
+        "Run FEN Suite",
+        ColorSuiteButton,
+        ColorSuiteButtonHover,
+        mousePosition,
+    )
+
+    # Leaderboard Toggle Button
+    DrawButton(
+        surface,
+        buttonFont,
+        leaderboardButtonRect,
+        "Back to Board" if showLeaderboard else "Leaderboard",
+        ColorDropdownSelected if showLeaderboard else ColorDropdownBackground,
+        ColorDropdownHover,
+        mousePosition,
+    )
 
     # Game Status Label
     statusSurface = headerFont.render(statusText, True, ColorPanelText)
     statusRect = statusSurface.get_rect(
-        center=(BoardPixelSize + ControlPanelWidth // 2, actionButtonRect.bottom + 24)
+        center=(BoardPixelSize + ControlPanelWidth // 2, leaderboardButtonRect.bottom + 20)
     )
     surface.blit(statusSurface, statusRect)
+
+    if suiteStatusText:
+        suiteSurface = headerFont.render(suiteStatusText, True, ColorClockActive)
+        suiteRect = suiteSurface.get_rect(
+            center=(BoardPixelSize + ControlPanelWidth // 2, leaderboardButtonRect.bottom + 42)
+        )
+        surface.blit(suiteSurface, suiteRect)
 
     # Clocks at bottom of panel
     blackClockLabel = headerFont.render("Black Clock", True, ColorPanelText)
@@ -467,6 +643,9 @@ def Main() -> None:
     labelFont = pygame.font.SysFont("Segoe UI", 14, bold=True)
     uiFont = pygame.font.SysFont("Segoe UI", 14)
     buttonFont = pygame.font.SysFont("Segoe UI", 15, bold=True)
+    titleFont = pygame.font.SysFont("Segoe UI", 22, bold=True)
+    tableHeaderFont = pygame.font.SysFont("Segoe UI", 14, bold=True)
+    tableRowFont = pygame.font.SysFont("Consolas", 14)
     clockFont = pygame.font.SysFont("Consolas", 22, bold=True)
     pieceFont = pygame.font.SysFont("Segoe UI Symbol", 56)
 
@@ -486,12 +665,22 @@ def Main() -> None:
     timeDropdown = DropdownMenu(
         BoardPixelSize + 20, 204, dropdownWidth, dropdownHeight, timeOptions, selectedIndex=1
     )
+    opponentDropdown = DropdownMenu(
+        415, 20, 205, 34, GetAvailableOpponents()
+    )
     actionButtonRect = pygame.Rect(
-        BoardPixelSize + 20, 260, dropdownWidth, 38
+        BoardPixelSize + 20, 256, dropdownWidth, 34
+    )
+    suiteButtonRect = pygame.Rect(
+        BoardPixelSize + 20, 298, dropdownWidth, 34
+    )
+    leaderboardButtonRect = pygame.Rect(
+        BoardPixelSize + 20, 340, dropdownWidth, 34
     )
 
     whiteEngine: Optional[EngineWorker] = None
     blackEngine: Optional[EngineWorker] = None
+    suiteRunner = FenSuiteRunner()
 
     gameStarted = False
     gameId = 0
@@ -500,7 +689,18 @@ def Main() -> None:
     flaggedColor: Optional[chess.Color] = None
     gameStartFen = chess.STARTING_FEN
     resultRecorded = False
+    customStatusOverride: Optional[str] = None
+    showLeaderboard = False
+    leaderboardData: list[dict] = []
+    leaderboardScroll = 0
     lastFrameTimestamp = time.perf_counter()
+
+    def RefreshLeaderboard() -> None:
+        nonlocal leaderboardData, leaderboardScroll
+        opponentDropdown.SetOptions(GetAvailableOpponents())
+        leaderboardData = GetLeaderboardSummary(opponentDropdown.GetSelectedOption())
+        maxScroll = max(0, len(leaderboardData) - 14)
+        leaderboardScroll = min(leaderboardScroll, maxScroll)
 
     def ResetClocks() -> None:
         nonlocal whiteTimeRemaining, blackTimeRemaining, flaggedColor, lastFrameTimestamp
@@ -514,23 +714,52 @@ def Main() -> None:
         flaggedColor = None
         lastFrameTimestamp = time.perf_counter()
 
+    def RefreshEngines() -> None:
+        nonlocal whiteEngine, blackEngine
+        whiteSelection = whiteDropdown.GetSelectedOption()
+        blackSelection = blackDropdown.GetSelectedOption()
+
+        if not whiteEngine or whiteEngine.botName != whiteSelection:
+            if whiteEngine:
+                whiteEngine.Quit()
+            whiteEngine = EngineWorker(whiteSelection) if whiteSelection != "Human" else None
+
+        if not blackEngine or blackEngine.botName != blackSelection:
+            if blackEngine:
+                blackEngine.Quit()
+            blackEngine = EngineWorker(blackSelection) if blackSelection != "Human" else None
+
     def ResetGameState() -> None:
-        nonlocal gameStarted, gameId, gameStartFen, resultRecorded
+        nonlocal gameStarted, gameId, gameStartFen, resultRecorded, customStatusOverride
+        suiteRunner.Stop()
         gameId += 1
         gameStarted = False
         resultRecorded = False
+        customStatusOverride = None
         chessBoard.reset()
         gameStartFen = chessBoard.fen()
         ResetClocks()
 
-    def StartGameState() -> None:
-        nonlocal gameStarted, gameId, gameStartFen, resultRecorded
+    def StartGameState(startFen: str = chess.STARTING_FEN) -> None:
+        nonlocal gameStarted, gameId, gameStartFen, resultRecorded, customStatusOverride
         gameId += 1
         resultRecorded = False
-        chessBoard.reset()
+        customStatusOverride = None
+        chessBoard.set_fen(startFen)
         gameStartFen = chessBoard.fen()
         ResetClocks()
         gameStarted = True
+
+    def LaunchNextSuiteGame() -> bool:
+        nextMatch = suiteRunner.PopNextMatch()
+        if nextMatch is None:
+            return False
+        fen, wBot, bBot = nextMatch
+        whiteDropdown.SetSelectedOption(wBot)
+        blackDropdown.SetSelectedOption(bBot)
+        RefreshEngines()
+        StartGameState(fen)
+        return True
 
     def BuildSearchLimit() -> chess.engine.Limit:
         preset = TimeControlPresets[timeDropdown.GetSelectedOption()]
@@ -543,20 +772,9 @@ def Main() -> None:
             black_inc=preset["inc"],
         )
 
-    def RefreshEngines() -> None:
-        nonlocal whiteEngine, blackEngine
-        if whiteEngine:
-            whiteEngine.Quit()
-        if blackEngine:
-            blackEngine.Quit()
-
-        whiteSelection = whiteDropdown.GetSelectedOption()
-        blackSelection = blackDropdown.GetSelectedOption()
-
-        whiteEngine = EngineWorker(whiteSelection) if whiteSelection != "Human" else None
-        blackEngine = EngineWorker(blackSelection) if blackSelection != "Human" else None
-
     def GetStatusText(isGameOver: bool) -> str:
+        if customStatusOverride:
+            return customStatusOverride
         if not gameStarted:
             return "Ready to Start"
         if flaggedColor == chess.WHITE:
@@ -589,23 +807,35 @@ def Main() -> None:
             if currentEvent.type == pygame.QUIT:
                 isGameRunning = False
             elif currentEvent.type == pygame.KEYDOWN and currentEvent.key == pygame.K_ESCAPE:
-                isGameRunning = False
+                if showLeaderboard:
+                    showLeaderboard = False
+                else:
+                    isGameRunning = False
+            elif currentEvent.type == pygame.MOUSEWHEEL and showLeaderboard:
+                maxScroll = max(0, len(leaderboardData) - 14)
+                leaderboardScroll = max(0, min(maxScroll, leaderboardScroll - currentEvent.y))
 
-            # Route clicks to whichever dropdown is open first
-            openDropdown = next(
-                (d for d in (whiteDropdown, blackDropdown, timeDropdown) if d.isOpen),
-                None,
-            )
+            activeDropdowns = [whiteDropdown, blackDropdown, timeDropdown]
+            if showLeaderboard:
+                activeDropdowns.append(opponentDropdown)
+
+            openDropdown = next((d for d in activeDropdowns if d.isOpen), None)
 
             if openDropdown is not None:
                 if openDropdown.HandleEvent(currentEvent):
-                    if openDropdown is timeDropdown:
+                    if openDropdown is opponentDropdown:
+                        leaderboardScroll = 0
+                        RefreshLeaderboard()
+                    elif openDropdown is timeDropdown:
                         ResetGameState()
                     else:
                         ResetGameState()
                         RefreshEngines()
             else:
-                if whiteDropdown.HandleEvent(currentEvent):
+                if showLeaderboard and opponentDropdown.HandleEvent(currentEvent):
+                    leaderboardScroll = 0
+                    RefreshLeaderboard()
+                elif whiteDropdown.HandleEvent(currentEvent):
                     ResetGameState()
                     RefreshEngines()
                 elif blackDropdown.HandleEvent(currentEvent):
@@ -618,10 +848,40 @@ def Main() -> None:
                     and currentEvent.button == 1
                     and actionButtonRect.collidepoint(currentEvent.pos)
                 ):
-                    if not gameStarted:
+                    showLeaderboard = False
+                    if not gameStarted and not suiteRunner.isActive:
                         StartGameState()
                     else:
                         ResetGameState()
+                elif (
+                    currentEvent.type == pygame.MOUSEBUTTONDOWN
+                    and currentEvent.button == 1
+                    and suiteButtonRect.collidepoint(currentEvent.pos)
+                ):
+                    wBot = whiteDropdown.GetSelectedOption()
+                    bBot = blackDropdown.GetSelectedOption()
+                    if wBot == "Human" or bBot == "Human":
+                        customStatusOverride = "Select 2 Bots First"
+                    else:
+                        showLeaderboard = False
+                        ResetGameState()
+                        selectedFile = SelectFenFile()
+                        lastFrameTimestamp = time.perf_counter()
+                        if selectedFile:
+                            fenList = LoadFenList(selectedFile)
+                            if fenList and suiteRunner.Start(fenList, wBot, bBot):
+                                LaunchNextSuiteGame()
+                            else:
+                                customStatusOverride = "No Valid FENs Found"
+                elif (
+                    currentEvent.type == pygame.MOUSEBUTTONDOWN
+                    and currentEvent.button == 1
+                    and leaderboardButtonRect.collidepoint(currentEvent.pos)
+                ):
+                    showLeaderboard = not showLeaderboard
+                    if showLeaderboard:
+                        leaderboardScroll = 0
+                        RefreshLeaderboard()
 
             if (
                 currentEvent.type == EngineMoveEventType
@@ -681,6 +941,15 @@ def Main() -> None:
             )
             resultRecorded = True
 
+            if showLeaderboard:
+                RefreshLeaderboard()
+
+            # Advance to next game if running a FEN suite
+            if suiteRunner.isActive:
+                if not LaunchNextSuiteGame():
+                    gameStarted = False
+                    customStatusOverride = "Suite Complete!"
+
         # Request bot move only while game is actively running
         if isGameActive:
             if chessBoard.turn == chess.WHITE and whiteEngine and not whiteEngine.isSearching:
@@ -700,8 +969,21 @@ def Main() -> None:
             whiteClockDisplay = fixedText
             blackClockDisplay = fixedText
 
-        DrawBoard(gameScreen, labelFont)
-        DrawPieces(gameScreen, chessBoard, pieceFont)
+        if showLeaderboard:
+            DrawLeaderboardView(
+                gameScreen,
+                titleFont,
+                tableHeaderFont,
+                tableRowFont,
+                opponentDropdown,
+                leaderboardData,
+                leaderboardScroll,
+                mousePosition,
+            )
+        else:
+            DrawBoard(gameScreen, labelFont)
+            DrawPieces(gameScreen, chessBoard, pieceFont)
+
         DrawControlPanel(
             gameScreen,
             uiFont,
@@ -711,8 +993,13 @@ def Main() -> None:
             blackDropdown,
             timeDropdown,
             actionButtonRect,
+            suiteButtonRect,
+            leaderboardButtonRect,
+            showLeaderboard,
             gameStarted,
+            suiteRunner.isActive,
             GetStatusText(isGameOver),
+            suiteRunner.GetProgressText(),
             whiteClockDisplay,
             blackClockDisplay,
             chessBoard.turn,

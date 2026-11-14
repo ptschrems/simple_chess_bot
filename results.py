@@ -133,10 +133,29 @@ def RecordPerftResult(
     SaveBotData(botName, botData)
 
 
-def GetLeaderboardSummary() -> list[dict]:
+def GetAvailableOpponents() -> list[str]:
+    """Returns ['All Opponents', 'Perft', ...sorted unique opponent names]."""
+    EnsureResultsDir()
+    opponents: set[str] = set()
+
+    for entry in os.listdir(ResultsDirectory):
+        if not entry.endswith(".json"):
+            continue
+        botName = os.path.splitext(entry)[0]
+        data = LoadBotData(botName)
+        opponents.add(data.get("botName", botName))
+        for match in data.get("matches", []):
+            opp = match.get("opponent")
+            if opp:
+                opponents.add(opp)
+
+    return ["All Opponents", "Perft"] + sorted(opponents)
+
+
+def GetLeaderboardSummary(opponentFilter: str = "All Opponents") -> list[dict]:
     """
-    Aggregates W/L/D stats, win rate, and best perft NPS across all bot files
-    so a future leaderboard UI can render them directly.
+    Aggregates W/D/L stats (optionally filtered to a single opponent)
+    or Perft benchmark stats when opponentFilter == 'Perft'.
     """
     EnsureResultsDir()
     leaderboard: list[dict] = []
@@ -146,30 +165,54 @@ def GetLeaderboardSummary() -> list[dict]:
             continue
         botName = os.path.splitext(entry)[0]
         data = LoadBotData(botName)
-        matches = data.get("matches", [])
-        perftRuns = data.get("perft", [])
+        displayName = data.get("botName", botName)
 
-        wins = sum(1 for m in matches if m.get("result") == "win")
-        losses = sum(1 for m in matches if m.get("result") == "loss")
-        draws = sum(1 for m in matches if m.get("result") == "draw")
-        total = len(matches)
-        score = wins + 0.5 * draws
-        winRate = (score / total * 100.0) if total > 0 else 0.0
+        if opponentFilter == "Perft":
+            perftRuns = data.get("perft", [])
+            if not perftRuns:
+                continue
+            bestRun = max(perftRuns, key=lambda p: (p.get("depth", 0), p.get("nps", 0)))
+            bestNps = max((p.get("nps", 0) for p in perftRuns), default=0)
+            leaderboard.append(
+                {
+                    "botName": displayName,
+                    "runs": len(perftRuns),
+                    "maxDepth": bestRun.get("depth", 0),
+                    "nodes": bestRun.get("nodes", 0),
+                    "timeSeconds": bestRun.get("timeSeconds", 0.0),
+                    "bestPerftNps": bestNps,
+                }
+            )
+        else:
+            if displayName == opponentFilter:
+                continue
 
-        bestNps = max((p.get("nps", 0) for p in perftRuns), default=0)
+            matches = data.get("matches", [])
+            if opponentFilter != "All Opponents":
+                matches = [m for m in matches if m.get("opponent") == opponentFilter]
 
-        leaderboard.append(
-            {
-                "botName": data.get("botName", botName),
-                "games": total,
-                "wins": wins,
-                "losses": losses,
-                "draws": draws,
-                "score": score,
-                "winRate": round(winRate, 1),
-                "bestPerftNps": bestNps,
-            }
-        )
+            wins = sum(1 for m in matches if m.get("result") == "win")
+            draws = sum(1 for m in matches if m.get("result") == "draw")
+            losses = sum(1 for m in matches if m.get("result") == "loss")
+            total = len(matches)
+            score = wins + 0.5 * draws
+            winRate = (score / total * 100.0) if total > 0 else 0.0
 
-    leaderboard.sort(key=lambda row: (row["score"], row["winRate"], row["bestPerftNps"]), reverse=True)
+            leaderboard.append(
+                {
+                    "botName": displayName,
+                    "games": total,
+                    "wins": wins,
+                    "draws": draws,
+                    "losses": losses,
+                    "score": score,
+                    "winRate": round(winRate, 1),
+                }
+            )
+
+    if opponentFilter == "Perft":
+        leaderboard.sort(key=lambda row: (row["maxDepth"], row["bestPerftNps"]), reverse=True)
+    else:
+        leaderboard.sort(key=lambda row: (row["score"], row["winRate"], row["games"]), reverse=True)
+
     return leaderboard
