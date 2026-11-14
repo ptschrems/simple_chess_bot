@@ -341,7 +341,7 @@ def DrawResultsArea(
         startY = summaryHeaderY + 28
         baseline = summaryHistory[0]
         baselineNodes = baseline["nodes"]
-        baselineMs = baseline["timeMs"]
+        baselineNps = baseline["nps"]
         visibleRuns = summaryHistory[-5:]
 
         for idx, run in enumerate(visibleRuns):
@@ -351,12 +351,12 @@ def DrawResultsArea(
             if idx % 2 == 1:
                 pygame.draw.rect(surface, ColorRowAlt, rowRect, border_radius=3)
 
-            if runNumber == 1 or baselineNodes <= 0 or baselineMs <= 0:
+            if runNumber == 1 or baselineNodes <= 0 or baselineNps <= 0:
                 nodeDeltaText = "base"
                 speedupText = "base"
             else:
                 nodePct = ((run["nodes"] - baselineNodes) / baselineNodes) * 100.0
-                speedupPct = ((baselineMs / run["timeMs"]) - 1.0) * 100.0
+                speedupPct = ((run["nps"] / baselineNps) - 1.0) * 100.0
                 nodeDeltaText = f"{nodePct:+.2f}%"
                 speedupText = f"{speedupPct:+.1f}%"
 
