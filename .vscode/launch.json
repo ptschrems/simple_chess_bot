@@ -8,6 +8,14 @@
             "program": "${workspaceFolder}/main.py",
             "cwd": "${workspaceFolder}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Run Bench",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/bench.py",
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal"
         }
     ]
 }

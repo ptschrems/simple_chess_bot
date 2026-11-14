@@ -13,6 +13,7 @@ std::atomic<bool> timeFlag = false;
 std::array<bool, 65536> killerMoves = {false};
 std::binary_semaphore bestLock(1);
 std::binary_semaphore ttLock(1);
+std::atomic<uint64_t> nodes = 0;
 
 
 /**
@@ -96,6 +97,102 @@ inline std::vector<chess::Square> GetPieceLocations(
     return locations;
 }
 
+inline int16_t EvaluatePawns(const chess::Board &board) {
+    int16_t score = 0;
+    const std::array<int16_t, 64> pawnEvals = {
+        0, 0, 0, 0, 0, 0, 0, 0,
+        150, 150, 150, 150, 150, 150, 150, 150,
+        110, 110, 120, 130, 130, 120, 110, 110,
+        105, 105, 110, 125, 125, 110, 105, 105,
+        100, 100, 100, 120, 120, 100, 100, 100,
+        105, 95, 90, 100, 100, 90, 95, 105,
+        105, 110, 110, 80, 80, 110, 110, 105,
+        0, 0, 0, 0, 0, 0, 0, 0
+    };
+    for (auto sq : GetPieceLocations(board, chess::PieceType::PAWN, chess::Color::WHITE)) {
+        score += pawnEvals[sq.flip().index()];
+    }
+    for (auto sq : GetPieceLocations(board, chess::PieceType::PAWN, chess::Color::BLACK)) {
+        score -= pawnEvals[sq.index()];
+    }
+    return score;
+}
+
+inline int16_t EvaluateKnights(const chess::Board &board) {
+    int16_t score = 0;
+    const std::array<int16_t, 64> knightEvals = {
+        250,260,270,270,270,270,260,250,
+        260,280,300,300,300,300,280,260,
+        270,300,310,315,315,310,300,270,
+        270,305,315,320,320,315,305,270,
+        270,305,315,320,320,315,305,270,
+        270,300,310,315,315,310,300,270,
+        260,280,300,300,300,300,280,260,
+        250,260,270,270,270,270,260,250
+    };
+    for (auto sq : GetPieceLocations(board, chess::PieceType::KNIGHT, chess::Color::WHITE)) {
+        score += knightEvals[sq.flip().index()];
+    }
+    for (auto sq : GetPieceLocations(board, chess::PieceType::KNIGHT, chess::Color::BLACK)) {
+        score -= knightEvals[sq.index()];
+    }
+    return score;
+}
+
+inline int16_t EvaluateBishops(const chess::Board &board) {
+    int16_t score = 0;
+    const std::array<int16_t, 64> bishopEvals = {
+        280, 290, 290, 290, 290, 290, 290, 280, 290, 300, 300, 300, 300,
+        300, 300, 290, 290, 300, 305, 310, 310, 305, 300, 290, 290, 305,
+        305, 310, 310, 305, 305, 290, 290, 300, 310, 310, 310, 310, 300,
+        290, 290, 310, 310, 310, 310, 310, 310, 290, 290, 305, 300, 300,
+        300, 300, 305, 290, 280, 290, 290, 290, 290, 290, 290, 280
+    };
+    for (auto sq : GetPieceLocations(board, chess::PieceType::BISHOP, chess::Color::WHITE)) {
+        score += bishopEvals[sq.flip().index()];
+    }
+    for (auto sq : GetPieceLocations(board, chess::PieceType::BISHOP, chess::Color::BLACK)) {
+        score -= bishopEvals[sq.index()];
+    }
+    return score;
+}
+
+inline int16_t EvaluateRooks(const chess::Board &board) {
+    int16_t score = 0;
+    const std::array<int16_t, 64> rookEvals = {
+        500, 500, 500, 500, 500, 500, 500, 500, 505, 510, 510, 510, 510,
+        510, 510, 505, 495, 500, 500, 500, 500, 500, 500, 495, 495, 500,
+        500, 500, 500, 500, 500, 495, 495, 500, 500, 500, 500, 500, 500,
+        495, 495, 500, 500, 500, 500, 500, 500, 495, 495, 500, 500, 500,
+        500, 500, 500, 495, 500, 500, 500, 505, 505, 500, 500, 500
+    };
+    for (auto sq : GetPieceLocations(board, chess::PieceType::ROOK, chess::Color::WHITE)) {
+        score += rookEvals[sq.flip().index()];
+    }
+    for (auto sq : GetPieceLocations(board, chess::PieceType::ROOK, chess::Color::BLACK)) {
+        score -= rookEvals[sq.index()];
+    }
+    return score;
+}
+
+inline int16_t EvaluateQueens(const chess::Board &board) {
+    int16_t score = 0;
+    const std::array<int16_t, 64> queenEvals = {
+        880, 890, 890, 895, 895, 890, 890, 880, 890, 900, 900, 900, 900,
+        900, 900, 890, 890, 900, 905, 905, 905, 905, 900, 890, 895, 900,
+        905, 905, 905, 905, 900, 895, 900, 900, 905, 905, 905, 905, 900,
+        895, 890, 905, 905, 905, 905, 905, 900, 890, 890, 900, 905, 900,
+        900, 900, 900, 890, 880, 890, 890, 895, 895, 890, 890, 880
+    };
+    for (auto sq : GetPieceLocations(board, chess::PieceType::QUEEN, chess::Color::WHITE)) {
+        score += queenEvals[sq.flip().index()];
+    }
+    for (auto sq : GetPieceLocations(board, chess::PieceType::QUEEN, chess::Color::BLACK)) {
+        score -= queenEvals[sq.index()];
+    }
+    return score;
+}
+
 /**
  * Compute material score for a board
  * @param board const reference board to compute material for
@@ -109,29 +206,11 @@ inline chess::Move Evaluate(const chess::Board &board) {
     }
 
     int16_t score = 0;
-
-    std::array<int16_t, 64> pawnEvals = {
-        0, 0, 0, 0, 0, 0, 0, 0,
-        150, 150, 150, 150, 150, 150, 150, 150,
-        110, 110, 120, 130, 130, 120, 110, 110,
-        105, 105, 110, 125, 125, 110, 105, 105,
-        100, 100, 100, 120, 120, 100, 100, 100,
-        105, 95, 90, 100, 100, 90, 95, 105,
-        105, 110, 110, 80, 80, 110, 110, 105,
-        0, 0, 0, 0, 0, 0, 0, 0
-    };
-
-    for (auto sq : GetPieceLocations(board, chess::PieceType::PAWN, chess::Color::WHITE)) {
-        score += pawnEvals[sq.flip().index()];
-    }
-    for (auto sq : GetPieceLocations(board, chess::PieceType::PAWN, chess::Color::BLACK)) {
-        score -= pawnEvals[sq.index()];
-    }
-
-    score += 300 * (board.pieces(chess::PieceType::KNIGHT, chess::Color::WHITE).count() - board.pieces(chess::PieceType::KNIGHT, chess::Color::BLACK).count());
-    score += 300 * (board.pieces(chess::PieceType::BISHOP, chess::Color::WHITE).count() - board.pieces(chess::PieceType::BISHOP, chess::Color::BLACK).count());
-    score += 500 * (board.pieces(chess::PieceType::ROOK,   chess::Color::WHITE).count() - board.pieces(chess::PieceType::ROOK,   chess::Color::BLACK).count());
-    score += 900 * (board.pieces(chess::PieceType::QUEEN,  chess::Color::WHITE).count() - board.pieces(chess::PieceType::QUEEN,  chess::Color::BLACK).count());
+    score += EvaluatePawns(board);
+    score += EvaluateKnights(board);
+    score += EvaluateBishops(board);
+    score += EvaluateRooks(board);
+    score += EvaluateQueens(board);
 
     if (board.kingSq(chess::Color::WHITE) == chess::Square::SQ_G1 || board.kingSq(chess::Color::WHITE) == chess::Square::SQ_C1) {
         score++;
@@ -188,6 +267,7 @@ inline chess::Movelist LegalMoves(chess::Board &board) {
  * @return best move & score
  */
 chess::Move Search(chess::Board &board, uint64_t time, uint8_t depth, int16_t alpha, int16_t beta) {
+    nodes++;
     if (board.isRepetition(2) || board.isHalfMoveDraw() || board.isInsufficientMaterial()) {
         return chess::Move::NO_MOVE; // Draw
     }
@@ -340,7 +420,7 @@ int main() {
                 }
             }
         } else if (token == "go") {
-            int movetime = -1, wtime = -1, btime = -1, winc = 0, binc = 0;
+            int movetime = -1, wtime = -1, btime = -1, winc = 0, binc = 0, maxDepth = 0;
             std::string param;
             while (iss >> param) {
                 if (param == "movetime") iss >> movetime;
@@ -348,22 +428,40 @@ int main() {
                 else if (param == "btime") iss >> btime;
                 else if (param == "winc") iss >> winc;
                 else if (param == "binc") iss >> binc;
+                else if (param == "depth") iss >> maxDepth;
             }
 
-            int timeMS = 100;
-            if (movetime > 0) {
-                timeMS = std::max(1, movetime - 10);
+            nodes = 0;
+            auto t0 = GetTime();
+
+            if (maxDepth > 0) {
+                timeFlag = false;
+                chess::Move bestMove = Search(board, t0 + 90000000, maxDepth, -32767, 32767); 
+                auto elapsed = std::max<int64_t>(1, GetTime() - t0);
+                uint64_t nps = (nodes * 1000ULL) / elapsed;
+
+                std::cout << "info depth " << maxDepth
+                        << " score cp " << bestMove.score()
+                        << " nodes " << nodes
+                        << " time " << elapsed
+                        << " nps " << nps << "\n";
+                std::cout << "bestmove " << chess::uci::moveToUci(bestMove) << "\n" << std::flush;
             } else {
-                int myTime = (board.sideToMove() == chess::Color::WHITE) ? wtime : btime;
-                int myInc = (board.sideToMove() == chess::Color::WHITE) ? winc : binc;
-                if (myTime > 0) {
-                    timeMS = std::max(10, (myTime / 30) + (myInc / 2) - 10);
+                int timeMS = 100;
+                if (movetime > 0) {
+                    timeMS = std::max(1, movetime - 10);
+                } else {
+                    int myTime = (board.sideToMove() == chess::Color::WHITE) ? wtime : btime;
+                    int myInc = (board.sideToMove() == chess::Color::WHITE) ? winc : binc;
+                    if (myTime > 0) {
+                        timeMS = std::max(10, (myTime / 30) + (myInc / 2) - 10);
+                    }
                 }
-            }
 
-            timeFlag = false;
-            chess::Move bestMove = IterativeSearch(board, timeMS);
-            std::cout << "bestmove " << chess::uci::moveToUci(bestMove) << "\n" << std::flush;
+                timeFlag = false;
+                chess::Move bestMove = IterativeSearch(board, timeMS);
+                std::cout << "bestmove " << chess::uci::moveToUci(bestMove) << "\n" << std::flush;
+            }
             ResetKillerMoves(killerMoves);
         } else if (token == "quit") {
             break;
