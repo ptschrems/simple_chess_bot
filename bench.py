@@ -9,7 +9,7 @@ import chess
 import chess.engine
 
 # Constants
-WindowWidth = 920
+WindowWidth = 980
 WindowHeight = 640
 ControlPanelWidth = 240
 TableAreaWidth = WindowWidth - ControlPanelWidth
@@ -311,12 +311,13 @@ def DrawResultsArea(
 
     summaryCols = [
         ("#", 24),
-        ("Bot", 56),
-        ("Depth", 230),
-        ("Nodes", 295),
-        ("Time (ms)", 415),
-        ("NPS", 525),
-        ("Delta", 615),
+        ("Bot", 54),
+        ("Depth", 210),
+        ("Nodes", 268),
+        ("Node Δ", 376),
+        ("Time (ms)", 458),
+        ("NPS", 554),
+        ("Speedup", 652),
     ]
 
     summaryHeaderY = 58
@@ -338,29 +339,36 @@ def DrawResultsArea(
     else:
         rowHeight = 28
         startY = summaryHeaderY + 28
+        baseline = summaryHistory[0]
+        baselineNodes = baseline["nodes"]
+        baselineMs = baseline["timeMs"]
         visibleRuns = summaryHistory[-5:]
-        baselineMs = visibleRuns[0]["timeMs"]
 
         for idx, run in enumerate(visibleRuns):
+            runNumber = len(summaryHistory) - len(visibleRuns) + idx + 1
             rowY = startY + idx * rowHeight
             rowRect = pygame.Rect(16, rowY, TableAreaWidth - 32, rowHeight - 2)
             if idx % 2 == 1:
                 pygame.draw.rect(surface, ColorRowAlt, rowRect, border_radius=3)
 
-            if idx == 0 or baselineMs <= 0:
-                deltaText = "base"
+            if runNumber == 1 or baselineNodes <= 0 or baselineMs <= 0:
+                nodeDeltaText = "base"
+                speedupText = "base"
             else:
-                pctChange = ((run["timeMs"] - baselineMs) / baselineMs) * 100.0
-                deltaText = f"{pctChange:+.1f}%"
+                nodePct = ((run["nodes"] - baselineNodes) / baselineNodes) * 100.0
+                speedupPct = ((baselineMs / run["timeMs"]) - 1.0) * 100.0
+                nodeDeltaText = f"{nodePct:+.2f}%"
+                speedupText = f"{speedupPct:+.1f}%"
 
             values = [
-                (str(idx + 1), 24),
-                (run["botName"][:18], 56),
-                (str(run["depth"]), 230),
-                (f"{run['nodes']:,}", 295),
-                (f"{run['timeMs']:,.1f}", 415),
-                (f"{run['nps']:,}", 525),
-                (deltaText, 615),
+                (str(runNumber), 24),
+                (run["botName"][:18], 54),
+                (str(run["depth"]), 210),
+                (f"{run['nodes']:,}", 268),
+                (nodeDeltaText, 376),
+                (f"{run['timeMs']:,.1f}", 458),
+                (f"{run['nps']:,}", 554),
+                (speedupText, 652),
             ]
             for valText, valX in values:
                 valSurf = rowFont.render(valText, True, ColorPanelText)
@@ -379,10 +387,10 @@ def DrawResultsArea(
     posCols = [
         ("#", 24),
         ("Position", 56),
-        ("Best Move", 250),
-        ("Nodes", 355),
-        ("Time (ms)", 480),
-        ("NPS", 585),
+        ("Best Move", 255),
+        ("Nodes", 365),
+        ("Time (ms)", 495),
+        ("NPS", 610),
     ]
 
     posHeaderY = breakdownTitleY + 28
@@ -407,10 +415,10 @@ def DrawResultsArea(
             values = [
                 (str(idx + 1), 24),
                 (label[:22], 56),
-                (step["move"], 250),
-                (f"{step['nodes']:,}", 355),
-                (f"{step['timeMs']:,.2f}", 480),
-                (f"{step['nps']:,}", 585),
+                (step["move"], 255),
+                (f"{step['nodes']:,}", 365),
+                (f"{step['timeMs']:,.2f}", 495),
+                (f"{step['nps']:,}", 610),
             ]
             textColor = ColorPanelText
         else:
@@ -418,10 +426,10 @@ def DrawResultsArea(
             values = [
                 (str(idx + 1), 24),
                 (label[:22], 56),
-                (statusMarker, 250),
-                ("-", 355),
-                ("-", 480),
-                ("-", 585),
+                (statusMarker, 255),
+                ("-", 365),
+                ("-", 495),
+                ("-", 610),
             ]
             textColor = ColorTextActive if statusMarker == "Searching..." else ColorTextMuted
 
