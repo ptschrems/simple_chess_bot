@@ -99,7 +99,7 @@ def LoadBotList() -> list[str]:
         for entry in sorted(os.listdir(botsDirectory)):
             fullPath = os.path.join(botsDirectory, entry)
             if os.path.isfile(fullPath) and (
-                entry.endswith(".py") or entry.endswith(".exe")
+                (entry.endswith(".py") or entry.endswith(".exe")) and (not (entry.startswith("c") or entry.startswith("p")))
             ):
                 botName = os.path.splitext(entry)[0]
                 if botName not in botList:
