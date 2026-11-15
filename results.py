@@ -1,12 +1,13 @@
 import os
 import json
+import math
 from datetime import datetime, timezone
 from typing import Optional
 import chess
 
-
 ResultsDirectory = os.path.join(os.path.dirname(__file__), "results")
-
+AnchorBotName = "minimax"
+AnchorBotRating = 100
 
 def EnsureResultsDir() -> None:
     os.makedirs(ResultsDirectory, exist_ok=True)
@@ -151,14 +152,93 @@ def GetAvailableOpponents() -> list[str]:
 
     return ["All Opponents", "Perft"] + sorted(opponents)
 
+def ComputePoolElos(
+    allBotData: dict[str, dict],
+    anchorBot: str = AnchorBotName,
+    anchorRating: float = AnchorBotRating,
+) -> dict[str, int]:
+    """
+    Computes global Maximum Likelihood (Ordo-style) Elo ratings across all bots
+    using pairwise match results.
+    """
+    bots = sorted(allBotData.keys())
+    if not bots:
+        return {}
+
+    if anchorBot not in allBotData:
+        anchorBot = bots[0]
+
+    # Aggregate pairwise wins, draws, losses (deduplicated from each bot's perspective)
+    pairStats: dict[tuple[str, str], list[float]] = {}
+    for botA, data in allBotData.items():
+        for m in data.get("matches", []):
+            botB = m.get("opponent")
+            if not botB or botB == "Human" or botB not in allBotData or botB == botA:
+                continue
+            res = m.get("result")
+            key = (botA, botB)
+            if key not in pairStats:
+                pairStats[key] = [0.0, 0.0]  # [points_for_A, total_games]
+            if res == "win":
+                pairStats[key][0] += 1.0
+            elif res == "draw":
+                pairStats[key][0] += 0.5
+            pairStats[key][1] += 1.0
+
+    # Ensure symmetry (average A->B and B->A in case only one side recorded a game)
+    symmetricPairs: list[tuple[str, str, float, float]] = []
+    visited: set[tuple[str, str]] = set()
+    for (a, b), (ptsAB, gamesAB) in pairStats.items():
+        if (a, b) in visited or (b, a) in visited:
+            continue
+        visited.add((a, b))
+        ptsBA, gamesBA = pairStats.get((b, a), [0.0, 0.0])
+        if gamesBA > 0:
+            totalGames = 0.5 * (gamesAB + gamesBA)
+            ptsA = 0.5 * (ptsAB + (gamesBA - ptsBA))
+        else:
+            totalGames = gamesAB
+            ptsA = ptsAB
+
+        # Laplace smoothing (+0.5 draw) prevents infinite Elo on 100% / 0% scores
+        symmetricPairs.append((a, b, ptsA + 0.5, totalGames + 1.0))
+
+    ratings = {b: anchorRating for b in bots}
+    scale = math.log(10.0) / 400.0
+
+    # Gradient ascent on logistic log-likelihood
+    for _ in range(400):
+        grads = {b: 0.0 for b in bots}
+        maxStep = 0.0
+
+        for a, b, ptsA, nGames in symmetricPairs:
+            diff = (ratings[a] - ratings[b]) * scale
+            expectedA = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, diff))))
+            grad = (ptsA - nGames * expectedA) * scale
+            grads[a] += grad
+            grads[b] -= grad
+
+        for b in bots:
+            if b == anchorBot:
+                continue
+            step = grads[b] * 2500.0
+            step = max(-50.0, min(50.0, step))
+            ratings[b] += step
+            maxStep = max(maxStep, abs(step))
+
+        if maxStep < 0.01:
+            break
+
+    return {b: round(r) for b, r in ratings.items()}
 
 def GetLeaderboardSummary(opponentFilter: str = "All Opponents") -> list[dict]:
     """
-    Aggregates W/D/L stats (optionally filtered to a single opponent)
-    or Perft benchmark stats when opponentFilter == 'Perft'.
+    Aggregates W/D/L stats and global pool Elo ratings (optionally filtered
+    to a single opponent) or Perft benchmark stats when opponentFilter == 'Perft'.
     """
     EnsureResultsDir()
     leaderboard: list[dict] = []
+    allBotData: dict[str, dict] = {}
 
     for entry in sorted(os.listdir(ResultsDirectory)):
         if not entry.endswith(".json"):
@@ -166,7 +246,11 @@ def GetLeaderboardSummary(opponentFilter: str = "All Opponents") -> list[dict]:
         botName = os.path.splitext(entry)[0]
         data = LoadBotData(botName)
         displayName = data.get("botName", botName)
+        allBotData[displayName] = data
 
+    poolElos = ComputePoolElos(allBotData) if opponentFilter != "Perft" else {}
+
+    for displayName, data in allBotData.items():
         if opponentFilter == "Perft":
             perftRuns = data.get("perft", [])
             if not perftRuns:
@@ -201,6 +285,7 @@ def GetLeaderboardSummary(opponentFilter: str = "All Opponents") -> list[dict]:
             leaderboard.append(
                 {
                     "botName": displayName,
+                    "elo": poolElos.get(displayName, round(AnchorBotRating)),
                     "games": total,
                     "wins": wins,
                     "draws": draws,
@@ -213,6 +298,6 @@ def GetLeaderboardSummary(opponentFilter: str = "All Opponents") -> list[dict]:
     if opponentFilter == "Perft":
         leaderboard.sort(key=lambda row: (row["maxDepth"], row["bestPerftNps"]), reverse=True)
     else:
-        leaderboard.sort(key=lambda row: (row["score"], row["winRate"], row["games"]), reverse=True)
+        leaderboard.sort(key=lambda row: (row["elo"], row["winRate"], row["games"]), reverse=True)
 
     return leaderboard
