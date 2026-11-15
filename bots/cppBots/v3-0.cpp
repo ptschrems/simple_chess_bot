@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 #include <semaphore>
+#include <algorithm>
 
 #include "chess-library/include/chess.hpp"
 
@@ -344,6 +345,60 @@ inline chess::Movelist LegalMoves(chess::Board &board) {
     return moves;
 }
 
+chess::Move Quiescence(chess::Board &board, uint64_t time, int16_t alpha, int16_t beta) {
+    nodes++;
+
+    if (GetTime() > time) [[unlikely]] {
+        timeFlag = true;
+        return chess::Move::NULL_MOVE;
+    }
+
+    // Evaluate the current position
+    chess::Move standPatMove = Evaluate(board);
+    int16_t standPat = standPatMove.score();
+
+    if (standPat >= beta) {
+        standPatMove.setScore(beta);
+        return standPatMove;
+    }
+    if (standPat > alpha) {
+        alpha = standPat;
+    }
+
+    // Generate only captures
+    chess::Movelist moves;
+    chess::movegen::legalmoves<chess::movegen::MoveGenType::CAPTURE>(moves, board);
+    OrderMoves(board, moves);
+
+    chess::Move returnMove = chess::Move::NO_MOVE;
+    returnMove.setScore(alpha);
+
+    // 3. Search captures with alpha-beta
+    for (auto &move : moves) {
+        board.makeMove(move);
+        chess::Move eval = Quiescence(board, time, -beta, -alpha);
+        board.unmakeMove(move);
+
+        if (timeFlag) {
+            return chess::Move::NULL_MOVE;
+        }
+
+        eval.setScore(-eval.score());
+        if (eval.score() > returnMove.score()) {
+            returnMove = move;
+            returnMove.setScore(eval.score());
+        }
+        if (eval.score() > alpha) {
+            alpha = eval.score();
+        }
+        if (alpha >= beta) {
+            break;
+        }
+    }
+
+    return returnMove;
+}
+
 /**
  * Search using iterative deepening
  * @param board reference to board to search in
@@ -358,7 +413,7 @@ chess::Move Search(chess::Board &board, uint64_t time, int8_t depth, int16_t alp
     }
 
     if (depth <= 0) {
-        return Evaluate(board);
+        return Quiescence(board, time, alpha, beta);
     }
 
     if (GetTime() > time) {
@@ -389,9 +444,6 @@ chess::Move Search(chess::Board &board, uint64_t time, int8_t depth, int16_t alp
             returnMove = move;
             returnMove.setScore(eval.score());
         } 
-        if (abs(eval.score()) > 10000) {
-            killerMoves[move.move()] = true;
-        }
         board.unmakeMove(move);
 
         if (eval.score() > alpha) {
@@ -440,6 +492,9 @@ chess::Move IterativeSearch(chess::Board &board, uint16_t time) {
 
             for (size_t i = 1; i < moves.size(); i++) {
                 chess::Move move = moves[i];
+                if (move.score() < -30000) {
+                    continue;
+                }
                 threads.emplace_back([&, move]() mutable {
                     chess::Board localBoard = board;
                     localBoard.makeMove(move);
@@ -547,7 +602,7 @@ int main() {
         iss >> token;
 
         if (token == "uci") {
-            std::cout << "id name Bot-v2.3\n";
+            std::cout << "id name Bot-v3.0\n";
             std::cout << "id author Patrick\n";
             std::cout << "uciok\n" << std::flush;
         } else if (token == "isready") {
