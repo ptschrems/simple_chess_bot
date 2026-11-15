@@ -99,7 +99,7 @@ def LoadBotList() -> list[str]:
         for entry in sorted(os.listdir(botsDirectory)):
             fullPath = os.path.join(botsDirectory, entry)
             if os.path.isfile(fullPath) and (
-                entry.endswith(".py") or entry.endswith(".exe")
+                (entry.endswith(".py") or entry.endswith(".exe")) and (not (entry.startswith("c") or entry.startswith("p")))
             ):
                 botName = os.path.splitext(entry)[0]
                 if botName not in botList:
@@ -390,14 +390,15 @@ def DrawLeaderboardView(
         ]
     else:
         columns = [
-            ("#", 24),
-            ("Bot", 64),
-            ("Games", 260),
-            ("W", 335),
+            ("#", 22),
+            ("Bot", 56),
+            ("Elo", 215),
+            ("Games", 275),
+            ("W", 340),
             ("D", 390),
-            ("L", 445),
-            ("Score", 500),
-            ("Win %", 565),
+            ("L", 440),
+            ("Score", 490),
+            ("Win %", 555),
         ]
 
     headerY = 82
@@ -444,14 +445,15 @@ def DrawLeaderboardView(
                 ]
             else:
                 values = [
-                    (str(rank), 24),
-                    (entry["botName"][:20], 64),
-                    (str(entry["games"]), 260),
-                    (str(entry["wins"]), 335),
+                    (str(rank), 22),
+                    (entry["botName"][:16], 56),
+                    (str(entry["elo"]), 215),
+                    (str(entry["games"]), 275),
+                    (str(entry["wins"]), 340),
                     (str(entry["draws"]), 390),
-                    (str(entry["losses"]), 445),
-                    (f"{entry['score']:g}", 500),
-                    (f"{entry['winRate']:.1f}%", 565),
+                    (str(entry["losses"]), 440),
+                    (f"{entry['score']:g}", 490),
+                    (f"{entry['winRate']:.1f}%", 555),
                 ]
 
             for valText, valX in values:
